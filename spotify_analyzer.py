@@ -1,5 +1,5 @@
 import spotipy
-from spotipy.oauth2 import SpotifyOAuth
+from spotipy.oauth2 import SpotifyClientCredentials
 import pandas as pd
 from datetime import datetime
 import time
@@ -10,28 +10,25 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Spotify API credentials
-CLIENT_ID = "3652b936c426424089ad33db68940d5a"
-CLIENT_SECRET = "dd3fb89cac0a4f8bbb195df2c8057f7e"
-REDIRECT_URI = "http://localhost:8888/callback"
-SCOPE = "playlist-read-private playlist-read-collaborative user-library-read user-read-private user-read-email playlist-modify-public playlist-modify-private"
+CLIENT_ID = "3652b936c426424089ad33db68940d5a"  # Replace with your Client ID
+CLIENT_SECRET = "dd3fb89cac0a4f8bbb195df2c8057f7e"  # Replace with your Client Secret
 
 class SpotifyAnalyzer:
     def __init__(self):
+        """Initialize the Spotify client with Client Credentials Flow."""
         try:
-            self.sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
+            self.sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
                 client_id=CLIENT_ID,
-                client_secret=CLIENT_SECRET,
-                redirect_uri=REDIRECT_URI,
-                scope=SCOPE,
-                cache_path=".cache"
+                client_secret=CLIENT_SECRET
             ))
             token = self.sp.auth_manager.get_access_token(as_dict=False)
-            logger.info(f"Initialized Spotify client. Access token: {token[:10]}...")
+            logger.info(f"Initialized Spotify client with Client Credentials Flow. Access token: {token[:10]}...")
         except Exception as e:
             logger.error(f"Failed to initialize Spotify client: {str(e)}")
             raise
 
     def get_playlist_id(self, url):
+        """Extract playlist ID from a Spotify URL."""
         try:
             logger.info(f"Extracting playlist ID from {url}")
             return url.split('/')[-1].split('?')[0]
@@ -40,6 +37,7 @@ class SpotifyAnalyzer:
             raise
 
     def get_user_profile(self, user_id):
+        """Fetch public user profile data."""
         try:
             logger.info(f"Fetching profile for user ID: {user_id}")
             profile = self.sp.user(user_id)
@@ -59,8 +57,9 @@ class SpotifyAnalyzer:
             return {}
 
     def get_artist_details(self, artist_ids):
+        """Fetch details for a list of artists."""
         try:
-            logger.info(f"Fetching artist details for artist_ids: {artist_ids}, type: {type(artist_ids)}")
+            logger.info(f"Fetching artist details for artist_ids: {artist_ids}")
             artists = self.sp.artists(artist_ids)
             return [{
                 "artist_id": artist["id"],
@@ -74,6 +73,7 @@ class SpotifyAnalyzer:
             return []
 
     def get_album_details(self, album_id):
+        """Fetch album details."""
         try:
             album = self.sp.album(album_id)
             return {
@@ -88,20 +88,9 @@ class SpotifyAnalyzer:
             return {}
 
     def get_audio_analysis_summary(self, track_id):
-        """
-        Fetches audio analysis data for a given track ID.
-        
-        Args:
-            track_id (str): The Spotify track ID.
-        
-        Returns:
-            dict: A dictionary containing audio analysis data or None for each field if the request fails.
-        """
+        """Fetch summarized audio analysis for a track."""
         try:
-            # Attempt to fetch audio analysis data using the Spotify API
             analysis = self.sp.audio_analysis(track_id)
-            
-            # Extract relevant fields from the analysis
             return {
                 "track_id": track_id,
                 "tempo_confidence": analysis["track"]["tempo_confidence"],
@@ -113,10 +102,7 @@ class SpotifyAnalyzer:
                 "num_beats": len(analysis["beats"])
             }
         except Exception as e:
-            # Log the error for troubleshooting
             logger.error(f"Error fetching audio analysis for {track_id}: {str(e)}")
-            
-            # Return default values (None) for all fields if the request fails
             return {
                 "track_id": track_id,
                 "tempo_confidence": None,
@@ -129,12 +115,10 @@ class SpotifyAnalyzer:
             }
 
     def get_playlist_data(self, playlist_url):
+        """Fetch detailed data for a public playlist."""
         try:
             playlist_id = self.get_playlist_id(playlist_url)
             logger.info(f"Fetching playlist data for ID: {playlist_id}")
-            
-            # Refresh token
-            self.sp.auth_manager.get_access_token(as_dict=False)
             
             playlist = self.sp.playlist(playlist_id, market="US")
             logger.info(f"Playlist name: {playlist['name']}, tracks: {playlist['tracks']['total']}")
@@ -150,8 +134,11 @@ class SpotifyAnalyzer:
                     track = item['track']
                     if track and track['id']:
                         artist_details = self.get_artist_details([track['artists'][0]['id']])
+                        time.sleep(0.1)  # Prevent rate limiting
                         album_details = self.get_album_details(track['album']['id'])
+                        time.sleep(0.1)  # Prevent rate limiting
                         audio_analysis = self.get_audio_analysis_summary(track['id'])
+                        time.sleep(0.1)  # Prevent rate limiting
 
                         track_data = {
                             # Playlist metadata
@@ -221,7 +208,7 @@ class SpotifyAnalyzer:
                     results = self.sp.next(results)
                 else:
                     results = None
-                time.sleep(0.5)
+                time.sleep(0.5)  # Delay between batches
 
             logger.info(f"Collected {len(track_ids)} track IDs. Fetching audio features...")
             audio_features = []
@@ -232,7 +219,7 @@ class SpotifyAnalyzer:
                     if features:
                         audio_features.extend([f for f in features if f])
                     logger.info(f"Fetched features for batch {i//100 + 1}")
-                    time.sleep(0.5)
+                    time.sleep(0.5)  # Delay between batches
             except Exception as e:
                 logger.error(f"Batch audio features fetch failed: {str(e)}. Falling back to individual fetches.")
                 for track_id in track_ids:
@@ -270,6 +257,7 @@ class SpotifyAnalyzer:
             raise
 
     def save_to_csv(self, df, filename):
+        """Save the DataFrame to a CSV file."""
         try:
             df.to_csv(filename, index=False)
             logger.info(f"Saved to {filename}")
@@ -280,7 +268,7 @@ class SpotifyAnalyzer:
 if __name__ == "__main__":
     try:
         analyzer = SpotifyAnalyzer()
-        playlist_url = "https://open.spotify.com/playlist/5wVl2MwWDgNXNCFBlXzOc0?si=5fb5f7e2a9a74be5"
+        playlist_url = "https://open.spotify.com/playlist/016qlNrWieB6Yw5zzrY9ic?si=6e3d634ccd394b0a"
         df = analyzer.get_playlist_data(playlist_url)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         analyzer.save_to_csv(df, f"playlist_data_{timestamp}.csv")
